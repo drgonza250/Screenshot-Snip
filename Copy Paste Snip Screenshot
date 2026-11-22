@@ -1,0 +1,83 @@
+pip install easyocr opencv-python pillow pyperclip mss
+
+from PIL import ImageGrab
+import easyocr
+import numpy as np
+import pyperclip
+import cv2
+import re
+import time
+import hashlib
+
+print("Loading OCR model...")
+reader = easyocr.Reader(['en'], gpu=False)
+
+def get_clipboard_image():
+    try:
+        img = ImageGrab.grabclipboard()
+        if isinstance(img, list):
+            return None
+        return img
+    except:
+        return None
+
+def image_hash(img):
+    return hashlib.md5(img.tobytes()).hexdigest()
+
+def extract_code(pil_img):
+    img = np.array(pil_img)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    gray = clahe.apply(gray)
+
+    results = reader.readtext(gray)
+    text = " ".join([r[1] for r in results]).upper()
+
+    pattern = r'\b[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}\b'
+    codes = re.findall(pattern, text)
+
+    if not codes:
+        loose = re.findall(r'[A-Z0-9]{5}[\s\-]?[A-Z0-9]{5}[\s\-]?[A-Z0-9]{5}[\s\-]?[A-Z0-9]{5}[\s\-]?[A-Z0-9]{5}', text)
+        for m in loose:
+            cleaned = re.sub(r'[\s\-]+', '-', m)
+            if re.match(pattern, cleaned):
+                codes.append(cleaned)
+
+    return list(set(codes)), text
+
+print("\n✅ Watching clipboard...")
+print("Snip the code with Win + Shift + S (works on any monitor)")
+print("The code will be copied to clipboard automatically.\n")
+print("Press Ctrl + C in this window to stop.\n")
+
+last_hash = None
+
+while True:
+    try:
+        img = get_clipboard_image()
+        if img is not None:
+            current_hash = image_hash(img)
+
+            if current_hash != last_hash:
+                print("New screenshot detected, processing...")
+                codes, raw = extract_code(img)
+
+                if codes:
+                    code = codes[0]
+                    pyperclip.copy(code)
+                    print(f"✅ Code copied to clipboard:\n   {code}\n")
+                else:
+                    print("❌ No code found in this snip.")
+                    print(f"Raw text: {raw[:200]}...\n")
+
+                last_hash = current_hash
+
+        time.sleep(0.4)
+
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        break
+    except Exception as e:
+        print(f"Error: {e}")
+        time.sleep(1)
